@@ -15,7 +15,7 @@ Each experiment is implemented in a modular Python script, using MongoDB for dat
 ---
 
 ## 📁 Directory Structure
-
+```bash
 . 
 ├── LICENSE 
 ├── exp1_similarity_analysis/ 
@@ -25,7 +25,7 @@ Each experiment is implemented in a modular Python script, using MongoDB for dat
 ├── exp3-1__score_and_match_rate_analysis.py 
 ├── exp3-2_ranking_alignment.py 
 └── README.md
-
+```
 
 ---
 
@@ -78,3 +78,4 @@ Evaluates ranking alignment quality:
 ### Python Dependencies
 ```bash
 pip install pymongo seaborn pandas matplotlib scikit-learn umap-learn
+```
