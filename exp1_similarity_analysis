@@ -1,0 +1,230 @@
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+from scipy.stats import ks_2samp
+from sklearn.metrics.pairwise import cosine_similarity
+from pymongo import MongoClient
+from bson.binary import Binary
+import pandas as pd
+import os
+
+def ensure_exp1_folder():
+    """Ensure exp1 folder exists"""
+    folder_path = "exp1"
+    if not os.path.exists(folder_path):
+        os.makedirs(folder_path)
+    return folder_path
+
+def connect_mongodb() -> MongoClient:
+    """Connect to MongoDB database"""
+    uri = "mongodb+srv://Cluster13662:PawanGupta666@cluster13662.s1t3w.mongodb.net/?retryWrites=true&w=majority&appName=Cluster13662"
+    return MongoClient(uri)
+
+def get_all_samples(collection):
+    """Get all samples from collection"""
+    try:
+        samples = list(collection.find({}, {
+            "description_embedding": 1,
+            "tag_embedding": 1
+        }))
+        print(f"Successfully retrieved {len(samples)} samples")
+        return samples
+    except Exception as e:
+        print(f"Error getting samples: {e}")
+        return []
+
+def binary_to_numpy(binary_data: Binary) -> np.ndarray:
+    """Convert binary data to NumPy array"""
+    try:
+        return np.frombuffer(binary_data, dtype=np.float32)
+    except Exception as e:
+        print(f"Error converting binary data: {e}")
+        return None
+
+def process_embeddings(samples):
+    """Process embedding data"""
+    desc_embeddings = []
+    tag_embeddings = []
+    valid_count = 0
+    
+    for sample in samples:
+        try:
+            if 'description_embedding' in sample and 'tag_embedding' in sample:
+                desc_emb = binary_to_numpy(sample['description_embedding'])
+                tag_emb = binary_to_numpy(sample['tag_embedding'])
+                if desc_emb is not None and tag_emb is not None:
+                    desc_embeddings.append(desc_emb)
+                    tag_embeddings.append(tag_emb)
+                    valid_count += 1
+        except Exception as e:
+            continue
+    
+    print(f"Successfully processed {valid_count} valid samples")
+    return np.array(desc_embeddings), np.array(tag_embeddings)
+
+def calculate_similarity_distributions(desc_embeddings, tag_embeddings):
+    """Calculate similarity distributions"""
+    sim_desc = cosine_similarity(desc_embeddings)
+    sim_tag = cosine_similarity(tag_embeddings)
+    
+    # Get upper triangular matrix (excluding diagonal)
+    triu_idx = np.triu_indices(sim_desc.shape[0], k=1)
+    return sim_desc[triu_idx], sim_tag[triu_idx]
+
+def plot_distributions(sim_desc_vals, sim_tag_vals, org_type: str):
+    """Plot distributions"""
+    folder_path = ensure_exp1_folder()
+    
+    # 1. KDE plot
+    plt.figure(figsize=(10, 6))
+    sns.kdeplot(sim_desc_vals, label="Description Embedding", shade=True)
+    sns.kdeplot(sim_tag_vals, label="Tag Embedding", shade=True)
+    plt.title(f"Cosine Similarity Distribution Comparison\nfor {org_type} Organizations")
+    plt.xlabel("Cosine Similarity")
+    plt.ylabel("Density")
+    plt.legend()
+    plt.savefig(os.path.join(folder_path, f'{org_type}_similarity_distribution.png'), 
+                dpi=300, bbox_inches='tight')
+    plt.close()
+    
+    # 2. Box plot
+    plt.figure(figsize=(8, 6))
+    data = pd.DataFrame({
+        'Description': sim_desc_vals,
+        'Tag': sim_tag_vals
+    })
+    sns.boxplot(data=data)
+    plt.title(f"Similarity Distribution Boxplot\nfor {org_type} Organizations")
+    plt.ylabel("Cosine Similarity")
+    plt.savefig(os.path.join(folder_path, f'{org_type}_similarity_boxplot.png'), 
+                dpi=300, bbox_inches='tight')
+    plt.close()
+    
+    # 3. Structural Convergence vs Semantic Divergence
+    plt.figure(figsize=(12, 5))
+    
+    # 3.1 Density plot
+    plt.subplot(1, 2, 1)
+    sns.kdeplot(data=data, fill=True, alpha=0.5)
+    plt.title("Structural Convergence vs\nSemantic Divergence")
+    plt.xlabel("Cosine Similarity")
+    plt.ylabel("Density")
+    
+    # 3.2 Violin plot
+    plt.subplot(1, 2, 2)
+    sns.violinplot(data=data)
+    plt.title("Distribution Shape Comparison")
+    plt.ylabel("Cosine Similarity")
+    
+    plt.tight_layout()
+    plt.savefig(os.path.join(folder_path, f'{org_type}_convergence_divergence.png'), 
+                dpi=300, bbox_inches='tight')
+    plt.close()
+
+def analyze_convergence_divergence(sim_desc_vals, sim_tag_vals):
+    """Analyze structural convergence vs semantic divergence"""
+    return {
+        "Convergence Metrics": {
+            "Tag Variance": np.var(sim_tag_vals),
+            "Tag IQR": np.percentile(sim_tag_vals, 75) - np.percentile(sim_tag_vals, 25),
+            "Tag Range": np.ptp(sim_tag_vals)
+        },
+        "Divergence Metrics": {
+            "Description Variance": np.var(sim_desc_vals),
+            "Description IQR": np.percentile(sim_desc_vals, 75) - np.percentile(sim_desc_vals, 25),
+            "Description Range": np.ptp(sim_desc_vals)
+        },
+        "Comparative Metrics": {
+            "Tag/Description Variance Ratio": np.var(sim_tag_vals) / np.var(sim_desc_vals),
+            "Tag/Description IQR Ratio": (np.percentile(sim_tag_vals, 75) - np.percentile(sim_tag_vals, 25)) / 
+                                      (np.percentile(sim_desc_vals, 75) - np.percentile(sim_desc_vals, 25))
+        }
+    }
+
+def plot_cdf(sim_desc_vals, sim_tag_vals, org_type: str):
+    """Plot Cumulative Distribution Function"""
+    folder_path = ensure_exp1_folder()
+    
+    plt.figure(figsize=(10, 6))
+    
+    # Calculate and plot CDF for each embedding type
+    for data, label, color in [
+        (sim_desc_vals, "Description", "green"),
+        (sim_tag_vals, "Tag", "orange")
+    ]:
+        # Calculate CDF
+        sorted_vals = np.sort(data)
+        p = np.arange(1, len(sorted_vals) + 1) / len(sorted_vals)
+        plt.plot(sorted_vals, p, label=label, linewidth=2, color=color)
+
+    # Add reference line at 0.5
+    plt.axhline(0.5, ls="--", color="black", alpha=0.5, label="Median")
+    
+    plt.xlabel("Cosine Similarity")
+    plt.ylabel("Cumulative Proportion")
+    plt.title("CDF of Pairwise Embedding Similarities")
+    plt.legend()
+    plt.grid(True, linestyle="--", alpha=0.3)
+    plt.xlim(0.6, 1.0)  # 设置与参考图相同的x轴范围
+    plt.ylim(0.0, 1.0)
+    
+    plt.tight_layout()
+    plt.savefig(os.path.join(folder_path, f'{org_type}_similarity_cdf.png'), 
+                dpi=300, bbox_inches='tight')
+    plt.close()
+
+def main():
+    client = connect_mongodb()
+    db = client['Organization5']
+    collection = db['For-Profit1']
+    
+    try:
+        # Get all samples
+        samples = get_all_samples(collection)
+        if not samples:
+            print("No samples retrieved, exiting program")
+            return
+        
+        # Process embedding data
+        desc_embeddings, tag_embeddings = process_embeddings(samples)
+        if len(desc_embeddings) == 0:
+            print("No valid embedding data processed, exiting program")
+            return
+        
+        # Calculate similarity distributions
+        sim_desc_vals, sim_tag_vals = calculate_similarity_distributions(
+            desc_embeddings, tag_embeddings)
+        
+        # Plot original distributions
+        plot_distributions(sim_desc_vals, sim_tag_vals, "For-Profit")
+        
+        # Add CDF plot
+        plot_cdf(sim_desc_vals, sim_tag_vals, "For-Profit")
+        
+        # KS test
+        ks_stat, p_value = ks_2samp(sim_desc_vals, sim_tag_vals)
+        print("\nKS Test Results:")
+        print(f"KS Statistic: {ks_stat:.4f}")
+        print(f"p-value: {p_value:.4e}")
+        
+        # Analyze convergence vs divergence
+        convergence_stats = analyze_convergence_divergence(sim_desc_vals, sim_tag_vals)
+        print("\nStructural Convergence vs Semantic Divergence Analysis:")
+        for category, metrics in convergence_stats.items():
+            print(f"\n{category}:")
+            for metric_name, value in metrics.items():
+                print(f"{metric_name}: {value:.4f}")
+        
+        # Save analysis results
+        pd.DataFrame(convergence_stats).to_csv(
+            os.path.join(ensure_exp1_folder(), 'For_Profit_convergence_analysis.csv'))
+        
+    except Exception as e:
+        print(f"Error during program execution: {e}")
+    
+    finally:
+        client.close()
+        print("\nDatabase connection closed")
+
+if __name__ == "__main__":
+    main()
