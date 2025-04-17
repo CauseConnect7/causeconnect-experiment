@@ -15,7 +15,7 @@ from sklearn.metrics import silhouette_score, normalized_mutual_info_score
 from scipy.spatial.distance import cdist
 
 def connect_mongodb():
-    uri = "mongodb+srv://Cluster13662:PawanGupta666@cluster13662.s1t3w.mongodb.net/?retryWrites=true&w=majority&appName=Cluster13662"
+    uri = "your mongodb"
     return MongoClient(uri)
 
 def get_data():
